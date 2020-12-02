@@ -17,47 +17,20 @@
 
 package org.quartz.simpl;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.Map.Entry;
-import java.util.concurrent.atomic.AtomicLong;
-
 import org.quartz.Calendar;
-import org.quartz.Job;
-import org.quartz.JobDataMap;
-import org.quartz.JobDetail;
-import org.quartz.JobKey;
-import org.quartz.JobPersistenceException;
-import org.quartz.ObjectAlreadyExistsException;
-import org.quartz.Trigger;
-import org.quartz.TriggerKey;
+import org.quartz.*;
 import org.quartz.Trigger.CompletedExecutionInstruction;
 import org.quartz.Trigger.TriggerState;
 import org.quartz.Trigger.TriggerTimeComparator;
-import org.quartz.impl.JobDetailImpl;
 import org.quartz.impl.matchers.GroupMatcher;
 import org.quartz.impl.matchers.StringMatcher;
-import org.quartz.spi.ClassLoadHelper;
-import org.quartz.spi.JobStore;
-import org.quartz.spi.OperableTrigger;
-import org.quartz.spi.SchedulerSignaler;
-import org.quartz.spi.TriggerFiredBundle;
-import org.quartz.spi.TriggerFiredResult;
+import org.quartz.spi.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.quartz.impl.matchers.EverythingMatcher.allTriggers;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * <p>
@@ -71,7 +44,8 @@ import static org.quartz.impl.matchers.EverythingMatcher.allTriggers;
  * should not be used if true persistence between program shutdowns is
  * required.
  * </p>
- * 
+ *  JobStore为Quartz任务和触发器提供了一个存储途径
+ *  https://my.oschina.net/chengxiaoyuan/blog/676644
  * @author James House
  * @author Sharada Jambula
  * @author Eric Mueller
@@ -85,27 +59,29 @@ public class RAMJobStore implements JobStore {
      * 
      * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
      */
-
+    // 根据根据key来定位的map
     protected HashMap<JobKey, JobWrapper> jobsByKey = new HashMap<JobKey, JobWrapper>(1000);
 
     protected HashMap<TriggerKey, TriggerWrapper> triggersByKey = new HashMap<TriggerKey, TriggerWrapper>(1000);
 
+    // 分组存放，这样便于对整个组进行操作
     protected HashMap<String, HashMap<JobKey, JobWrapper>> jobsByGroup = new HashMap<String, HashMap<JobKey, JobWrapper>>(25);
 
     protected HashMap<String, HashMap<TriggerKey, TriggerWrapper>> triggersByGroup = new HashMap<String, HashMap<TriggerKey, TriggerWrapper>>(25);
 
+    // 按优先级、时间顺序排序，第一条数据就是最近一条要执行的
     protected TreeSet<TriggerWrapper> timeTriggers = new TreeSet<TriggerWrapper>(new TriggerWrapperComparator());
-
+    // 时间日期
     protected HashMap<String, Calendar> calendarsByName = new HashMap<String, Calendar>(25);
-
+    // 所有的触发器
     protected Map<JobKey, List<TriggerWrapper>> triggersByJob = new HashMap<JobKey, List<TriggerWrapper>>(1000);
 
     protected final Object lock = new Object();
-
+    // 暂停的组
     protected HashSet<String> pausedTriggerGroups = new HashSet<String>();
 
     protected HashSet<String> pausedJobGroups = new HashSet<String>();
-
+    // 如果设置不能并发执行，正在执行的任务会放到这边
     protected HashSet<JobKey> blockedJobs = new HashSet<JobKey>();
     
     protected long misfireThreshold = 5000l;
@@ -207,7 +183,7 @@ public class RAMJobStore implements JobStore {
      * @throws JobPersistenceException
      */
     public void clearAllSchedulingData() throws JobPersistenceException {
-
+        //加锁
         synchronized (lock) {
             // unschedule jobs (delete triggers)
             List<String> lst = getTriggerGroupNames();
@@ -274,25 +250,30 @@ public class RAMJobStore implements JobStore {
         boolean repl = false;
 
         synchronized (lock) {
+            //从这句可以看出jobsByKey里面存放了所有的Job的Key
             if (jobsByKey.get(jw.key) != null) {
                 if (!replaceExisting) {
                     throw new ObjectAlreadyExistsException(newJob);
                 }
                 repl = true;
             }
-
+            //如果没有存在则放到集合中
             if (!repl) {
+                //获取job分组
                 // get job group
                 HashMap<JobKey, JobWrapper> grpMap = jobsByGroup.get(newJob.getKey().getGroup());
                 if (grpMap == null) {
                     grpMap = new HashMap<JobKey, JobWrapper>(100);
                     jobsByGroup.put(newJob.getKey().getGroup(), grpMap);
                 }
+                //放到分组集合
                 // add to jobs by group
                 grpMap.put(newJob.getKey(), jw);
                 // add to jobs by FQN map
+                //放到全局的map中
                 jobsByKey.put(jw.key, jw);
             } else {
+                //如果已经存在则修改JobDetail
                 // update job detail
                 JobWrapper orig = jobsByKey.get(jw.key);
                 orig.jobDetail = jw.jobDetail; // already cloned
@@ -410,14 +391,15 @@ public class RAMJobStore implements JobStore {
         TriggerWrapper tw = new TriggerWrapper((OperableTrigger)newTrigger.clone());
 
         synchronized (lock) {
+            //triggersByKey里面包含所有的trigger的Key
             if (triggersByKey.get(tw.key) != null) {
                 if (!replaceExisting) {
                     throw new ObjectAlreadyExistsException(newTrigger);
                 }
-    
+                //删除原有的
                 removeTrigger(newTrigger.getKey(), false);
             }
-    
+            // 判断触发器对应的job是否存在
             if (retrieveJob(newTrigger.getJobKey()) == null) {
                 throw new JobPersistenceException("The job ("
                         + newTrigger.getJobKey()
@@ -431,7 +413,7 @@ public class RAMJobStore implements JobStore {
                 triggersByJob.put(tw.jobKey, jobList);
             }
             jobList.add(tw);
-            
+            // 添加trigger到分组
             // add to triggers by group
             HashMap<TriggerKey, TriggerWrapper> grpMap = triggersByGroup.get(newTrigger.getKey().getGroup());
             if (grpMap == null) {
@@ -441,7 +423,7 @@ public class RAMJobStore implements JobStore {
             grpMap.put(newTrigger.getKey(), tw);
             // add to triggers by FQN map
             triggersByKey.put(tw.key, tw);
-
+            //被暂停的组里面有没有，如果有则状态设为paused
             if (pausedTriggerGroups.contains(newTrigger.getKey().getGroup())
                     || pausedJobGroups.contains(newTrigger.getJobKey().getGroup())) {
                 tw.state = TriggerWrapper.STATE_PAUSED;
@@ -451,6 +433,7 @@ public class RAMJobStore implements JobStore {
             } else if (blockedJobs.contains(tw.jobKey)) {
                 tw.state = TriggerWrapper.STATE_BLOCKED;
             } else {
+                //放到按优先级时间顺序的set中
                 timeTriggers.add(tw);
             }
         }

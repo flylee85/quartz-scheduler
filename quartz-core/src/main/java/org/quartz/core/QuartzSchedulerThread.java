@@ -18,11 +18,6 @@
 
 package org.quartz.core;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Random;
-import java.util.concurrent.atomic.AtomicBoolean;
-
 import org.quartz.JobPersistenceException;
 import org.quartz.SchedulerException;
 import org.quartz.Trigger;
@@ -34,6 +29,11 @@ import org.quartz.spi.TriggerFiredResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * <p>
  * The thread responsible for performing the work of firing <code>{@link Trigger}</code>
@@ -43,7 +43,7 @@ import org.slf4j.LoggerFactory;
  * @see QuartzScheduler
  * @see org.quartz.Job
  * @see Trigger
- *
+ *   线程QuartzSchedulerThread的run()方法以while(true)的方式循环执行
  * @author James House
  */
 public class QuartzSchedulerThread extends Thread {
@@ -274,7 +274,8 @@ public class QuartzSchedulerThread extends Thread {
                     } catch (Exception ignore) {
                     }
                 }
-
+                // https://my.oschina.net/chengxiaoyuan/blog/674603
+                //获取可用线程数 qsRsrcs是QuartzSchedulerResources对象
                 int availThreadCount = qsRsrcs.getThreadPool().blockForAvailableThreads();
                 if(availThreadCount > 0) { // will always be true, due to semantics of blockForAvailableThreads...
 
@@ -385,22 +386,26 @@ public class QuartzSchedulerThread extends Thread {
                                 qsRsrcs.getJobStore().releaseAcquiredTrigger(triggers.get(i));
                                 continue;
                             }
-
+                            // 下面是开始执行任务
                             JobRunShell shell = null;
                             try {
+                                //构造执行对象，JobRunShell实现了Runnable
                                 shell = qsRsrcs.getJobRunShellFactory().createJobRunShell(bndle);
+                                //这个里面会用我们自定义的Job来new一个对象，并把相关执行Job是需要的数据传给JobExecutionContextImpl(这是我们自定义job的execute方法参数)
                                 shell.initialize(qs);
                             } catch (SchedulerException se) {
                                 qsRsrcs.getJobStore().triggeredJobComplete(triggers.get(i), bndle.getJobDetail(), CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR);
                                 continue;
                             }
 
+                            // 这里是把任务放入到线程池中
                             if (qsRsrcs.getThreadPool().runInThread(shell) == false) {
                                 // this case should never happen, as it is indicative of the
                                 // scheduler being shutdown or a bug in the thread pool or
                                 // a thread pool being used concurrently - which the docs
                                 // say not to do...
                                 getLog().error("ThreadPool.runInThread() return false!");
+                                //放到线程池失败后，通知jobStore完成
                                 qsRsrcs.getJobStore().triggeredJobComplete(triggers.get(i), bndle.getJobDetail(), CompletedExecutionInstruction.SET_ALL_JOB_TRIGGERS_ERROR);
                             }
 

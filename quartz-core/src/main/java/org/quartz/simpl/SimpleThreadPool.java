@@ -403,7 +403,7 @@ public class SimpleThreadPool implements ThreadPool {
      * shut down, the Runnable is executed immediately within a new additional
      * thread.
      * </p>
-     * 
+     *   可用线程集合中取一个线程执行任务并放到正在使用线程集合中，如果线程成被shutdown了则创建一个额外的线程
      * @param runnable
      *          the <code>Runnable</code> to be added.
      */
@@ -425,12 +425,16 @@ public class SimpleThreadPool implements ThreadPool {
             }
 
             if (!isShutdown) {
+                //到可用线程集合里取出第一个
                 WorkerThread wt = (WorkerThread)availWorkers.removeFirst();
+                //放到该正在使用线程池中
                 busyWorkers.add(wt);
+                //运行任务
                 wt.run(runnable);
             } else {
                 // If the thread pool is going down, execute the Runnable
                 // within a new additional worker thread (no thread from the pool).
+                //如果线程池关闭了则创建一个额外的线程
                 WorkerThread wt = new WorkerThread(this, threadGroup,
                         "WorkerThread-LastJob", prio, isMakeThreadsDaemons(), runnable);
                 busyWorkers.add(wt);
@@ -541,6 +545,7 @@ public class SimpleThreadPool implements ThreadPool {
             run.set(false);
         }
 
+        //添加任务
         public void run(Runnable newRunnable) {
             synchronized(lock) {
                 if(runnable != null) {
@@ -570,6 +575,7 @@ public class SimpleThreadPool implements ThreadPool {
 
                         if (runnable != null) {
                             ran = true;
+                            //调用任务的run方法
                             runnable.run();
                         }
                     }

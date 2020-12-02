@@ -838,7 +838,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
 
         // Get ThreadPool Properties
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+        // 创建线程池，这个在配置文件里面配线程池类名
         String tpClass = cfg.getStringProperty(PROP_THREAD_POOL_CLASS, SimpleThreadPool.class.getName());
 
         if (tpClass == null) {
@@ -865,7 +865,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
 
         // Get JobStore Properties
         // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
+        // 创建jobStore， jobstore也是在配置文件配的
         String jsClass = cfg.getStringProperty(PROP_JOB_STORE_CLASS,
                 RAMJobStore.class.getName());
 
@@ -1560,6 +1560,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
      * </p>
      */
     public Scheduler getScheduler() throws SchedulerException {
+        // 第一步：加载配置文件，System的properties覆盖前面的配置
         if (cfg == null) {
             initialize();
         }
@@ -1575,7 +1576,7 @@ public class StdSchedulerFactory implements SchedulerFactory {
                 return sched;
             }
         }
-
+        // 第二步：初始化，生成scheduler
         sched = instantiate();
 
         return sched;
